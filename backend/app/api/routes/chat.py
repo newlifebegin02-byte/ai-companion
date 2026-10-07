@@ -32,7 +32,7 @@ async def send_message(chat_data: ChatRequest, current_user: User = Depends(get_
     db.add(user_message)
     db.commit()
     personality = character.personality or {}
-    system_prompt = f"""You are {character.name}, a {character.age}-year-old {character.occupation}. Personality: {personality.get^('affection_style', 'warm'^)}, {personality.get^('humor_style', 'witty'^)}. Backstory: {character.backstory[:200]}. Respond naturally as {character.name} would. Keep it conversational ^(2-4 sentences^)."""
+    system_prompt = f"""You are {character.name}, a {character.age}-year-old {character.occupation}. Personality: {personality.get('affection_style', 'warm')}, {personality.get('humor_style', 'witty')}. Backstory: {character.backstory[:200]}. Respond naturally as {character.name} would. Keep it conversational (2-4 sentences)."""
     messages = [{"role": "user", "content": chat_data.message}]
     ai_response_text = await llm_service.generate_response(system_prompt, messages)
     new_emotion = emotion_engine.update_from_interaction(user_sentiment=0.2, interaction_quality=0.7, user_message_length=len(chat_data.message))
