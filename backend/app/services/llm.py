@@ -19,7 +19,7 @@ class LLMService:
                 role = "user" if msg["role"] == "user" else "assistant"
                 claude_messages.append({"role": role, "content": msg["content"]})
             
-            # Call Claude API - no temperature for new models
+            # Call Claude API
             response = self.anthropic_client.messages.create(
                 model="claude-sonnet-5-5",
                 max_tokens=max_tokens,
@@ -27,23 +27,17 @@ class LLMService:
                 messages=claude_messages
             )
             
-            # Debug: print response structure
-            print(f"Claude response: {response}")
+            # Extract text - find the text block, not thinking block
+            for block in response.content:
+                if hasattr(block, 'type') and block.type == 'text':
+                    if hasattr(block, 'text') and block.text:
+                        return block.text
             
-            # Extract text - handle different response formats
-            if hasattr(response, 'content') and response.content:
-                if isinstance(response.content, list) and len(response.content) > 0:
-                    first_content = response.content[0]
-                    if hasattr(first_content, 'text'):
-                        return first_content.text
-                    elif isinstance(first_content, dict) and 'text' in first_content:
-                        return first_content['text']
-            
-            # If we get here, response structure is unexpected
-            return f"I received a response but couldn't parse it. Raw: {str(response)}"
+            # If no text block found, return fallback
+            return "I'm sorry, I couldn't generate a proper response. Please try again."
             
         except Exception as e:
             print(f"Claude Error: {str(e)}")
-            return f"I'm having trouble right now. Error: {str(e)}"
+            return f"I'm having trouble right now. Please try again in a moment."
 
 llm_service = LLMService()
