@@ -25,19 +25,45 @@ async def send_message(chat_data: ChatRequest, current_user: User = Depends(get_
     character = db.query(Character).filter(Character.id == chat_data.character_id, Character.user_id == current_user.id).first()
     if not character:
         raise HTTPException(status_code=404, detail="Character not found")
+    
     conversation = Conversation(user_id=current_user.id, character_id=character.id, title=f"Chat with {character.name}")
     db.add(conversation)
     db.commit()
+    
     user_message = Message(conversation_id=conversation.id, content=chat_data.message, sender=SenderType.USER)
     db.add(user_message)
     db.commit()
+    
     personality = character.personality or {}
     system_prompt = f"""You are {character.name}, a {character.age}-year-old {character.occupation}. Personality: {personality.get('affection_style', 'warm')}, {personality.get('humor_style', 'witty')}. Backstory: {character.backstory[:200]}. Respond naturally as {character.name} would. Keep it conversational (2-4 sentences)."""
+    
     messages = [{"role": "user", "content": chat_data.message}]
+    
+    # Get AI response with fallback
     ai_response_text = await llm_service.generate_response(system_prompt, messages)
+    
+    # CRITICAL: Ensure we never save None to database
+    if not ai_response_text or ai_response_text.strip() == "" or ai_response_text == "None":
+        ai_response_text = "I'm sorry, I'm having trouble right now. Please try again in a moment."
+    
     new_emotion = emotion_engine.update_from_interaction(user_sentiment=0.2, interaction_quality=0.7, user_message_length=len(chat_data.message))
-    ai_message = Message(conversation_id=conversation.id, content=ai_response_text, sender=SenderType.CHARACTER, emotion_state=new_emotion.dict())
+    
+    ai_message = Message(
+        conversation_id=conversation.id, 
+        content=ai_response_text, 
+        sender=SenderType.CHARACTER, 
+        emotion_state=new_emotion.dict()
+    )
     db.add(ai_message)
     db.commit()
     db.refresh(ai_message)
-    return ChatResponse(message=MessageResponse(id=ai_message.id, content=ai_message.content, sender=ai_message.sender, created_at=ai_message.created_at), character_emotion=EmotionState(**new_emotion.dict()))
+    
+    return ChatResponse(
+        message=MessageResponse(
+            id=ai_message.id, 
+            content=ai_message.content, 
+            sender=ai_message.sender, 
+            created_at=ai_message.created_at
+        ), 
+        character_emotion=EmotionState(**new_emotion.dict())
+    )
