@@ -12,7 +12,7 @@ class LLMService:
         if not self.anthropic_client:
             return "Hello! I'm your AI companion. ^(Configure ANTHROPIC_API_KEY to enable full responses^)"
         claude_messages = [{"role": msg["role"], "content": msg["content"]} for msg in messages]
-        response = self.anthropic_client.messages.create(model="claude-3-sonnet-20240229", max_tokens=max_tokens, temperature=temperature, system=system_prompt, messages=claude_messages)
+        response = self.anthropic_client.messages.create(model="claude-haiku-4.5", max_tokens=max_tokens, temperature=temperature, system=system_prompt, messages=claude_messages)
         return response.content[0].text
 
 llm_service = LLMService()
