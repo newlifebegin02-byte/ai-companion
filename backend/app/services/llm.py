@@ -10,26 +10,40 @@ class LLMService:
 
     async def generate_response(self, system_prompt: str, messages: List[Dict], temperature: float = 0.7, max_tokens: int = 500) -> str:
         if not self.anthropic_client:
-            return "Hello! I'm your AI companion. (Configure ANTHROPIC_API_KEY to enable full responses)"
-        
-        claude_messages = [{"role": msg["role"], "content": msg["content"]} for msg in messages]
+            return "Hello! I'm your AI companion. (Configure ANTHROPIC_API_KEY)"
         
         try:
+            # Convert messages format
+            claude_messages = []
+            for msg in messages:
+                role = "user" if msg["role"] == "user" else "assistant"
+                claude_messages.append({"role": role, "content": msg["content"]})
+            
+            # Call Claude API - no temperature for new models
             response = self.anthropic_client.messages.create(
-                model="claude-sonnet-5-5", 
-                max_tokens=max_tokens, 
-                system=system_prompt, 
+                model="claude-sonnet-5-5",
+                max_tokens=max_tokens,
+                system=system_prompt,
                 messages=claude_messages
             )
             
-            # Fallback if no content
-            if not response.content or len(response.content) == 0:
-                return "I'm sorry, I couldn't generate a response. Please try again."
+            # Debug: print response structure
+            print(f"Claude response: {response}")
             
-            return response.content[0].text
+            # Extract text - handle different response formats
+            if hasattr(response, 'content') and response.content:
+                if isinstance(response.content, list) and len(response.content) > 0:
+                    first_content = response.content[0]
+                    if hasattr(first_content, 'text'):
+                        return first_content.text
+                    elif isinstance(first_content, dict) and 'text' in first_content:
+                        return first_content['text']
+            
+            # If we get here, response structure is unexpected
+            return f"I received a response but couldn't parse it. Raw: {str(response)}"
             
         except Exception as e:
-            print(f"LLM Error: {str(e)}")
+            print(f"Claude Error: {str(e)}")
             return f"I'm having trouble right now. Error: {str(e)}"
 
 llm_service = LLMService()
