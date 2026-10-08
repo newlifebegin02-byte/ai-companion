@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime
+from pydantic import BaseModel
 from app.models.database import get_db, Character, Conversation, Message, User
 from app.models.schemas import ChatRequest, ChatResponse, MessageResponse, EmotionState, SenderType
 from app.services.llm import llm_service
@@ -11,6 +12,11 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 security = HTTPBearer()
+
+# Request models
+class VoiceMessageRequest(BaseModel):
+    character_id: str
+    audio_data: str
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)) -> User:
     user_id = verify_token(credentials.credentials)
@@ -69,12 +75,14 @@ async def send_message(chat_data: ChatRequest, current_user: User = Depends(get_
 
 @router.post("/send-voice")
 async def send_voice_message(
-    character_id: str,
-    audio_data: str,
+    request: VoiceMessageRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Receive voice message, transcribe, and respond with text"""
+    
+    character_id = request.character_id
+    audio_data = request.audio_data
     
     # Get character
     character = db.query(Character).filter(
