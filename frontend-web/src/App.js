@@ -9,7 +9,6 @@ const useStore = create((set) => ({
   character: null,
   messages: [],
   isTyping: false,
-  conversations: [],
   
   setToken: (token) => {
     localStorage.setItem('token', token);
@@ -17,16 +16,14 @@ const useStore = create((set) => ({
   },
   
   setCharacter: (character) => set({ character, messages: [] }),
-  setMessages: (messages) => set({ messages }),
   addMessage: (message) => set((state) => ({ 
     messages: [...state.messages, message] 
   })),
   setTyping: (isTyping) => set({ isTyping }),
-  setConversations: (conversations) => set({ conversations }),
   
   logout: () => {
     localStorage.removeItem('token');
-    set({ token: null, character: null, messages: [], conversations: [] });
+    set({ token: null, character: null, messages: [] });
   }
 }));
 
@@ -209,9 +206,11 @@ function CharacterList() {
 // Chat Component
 function Chat() {
   const [input, setInput] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState(null);
   const messagesEndRef = useRef(null);
   const navigate = useNavigate();
-  const { character, messages, addMessage, isTyping, setTyping, logout } = useStore();
+  const { character, messages, addMessage, isTyping, setTyping } = useStore();
   
   useEffect(() => {
     if (!character) {
@@ -266,6 +265,78 @@ function Chat() {
     }
   };
   
+  // Voice recording functions
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: 'audio/wav' });
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = async () => {
+          const base64Audio = reader.result.split(',')[1];
+          await sendVoiceMessage(base64Audio);
+        };
+      };
+
+      recorder.start();
+      setMediaRecorder(recorder);
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Error accessing microphone:', err);
+      alert('Cannot access microphone');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder) {
+      mediaRecorder.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const sendVoiceMessage = async (base64Audio) => {
+    if (!character) return;
+    
+    setTyping(true);
+    try {
+      const response = await api.post('/chat/send-voice', {
+        character_id: character.id,
+        audio_data: base64Audio
+      });
+      
+      // Add user message (transcribed text)
+      addMessage({
+        id: Date.now(),
+        content: `🎤 ${response.data.user_text}`,
+        sender: 'user',
+        created_at: new Date().toISOString()
+      });
+      
+      // Add AI response
+      addMessage({
+        id: response.data.message_id,
+        content: response.data.ai_response,
+        sender: 'character',
+        created_at: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error(err);
+      addMessage({
+        id: Date.now() + 1,
+        content: 'Sorry, I could not process your voice message.',
+        sender: 'system',
+        created_at: new Date().toISOString()
+      });
+    } finally {
+      setTyping(false);
+    }
+  };
+  
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -284,7 +355,7 @@ function Chat() {
         <div style={styles.headerInfo}>
           <h2 style={styles.headerName}>{character.name}</h2>
           <p style={styles.headerStatus}>
-            {isTyping ? 'typing...' : 'online'}
+            {isTyping ? 'typing...' : isRecording ? 'recording...' : 'online'}
           </p>
         </div>
       </div>
@@ -328,6 +399,16 @@ function Chat() {
       </div>
       
       <div style={styles.inputContainer}>
+        <button
+          onClick={isRecording ? stopRecording : startRecording}
+          style={{
+            ...styles.micButton,
+            backgroundColor: isRecording ? '#ff3b30' : '#007AFF'
+          }}
+        >
+          {isRecording ? '⏹️' : '🎤'}
+        </button>
+        
         <input
           type="text"
           value={input}
@@ -337,6 +418,7 @@ function Chat() {
           style={styles.chatInput}
           disabled={isTyping}
         />
+        
         <button 
           onClick={sendMessage} 
           style={{
@@ -598,7 +680,23 @@ const styles = {
     padding: '15px 20px',
     display: 'flex',
     gap: '10px',
-    boxShadow: '0 -2px 10px rgba(0,0,0,0.1)'
+    boxShadow: '0 -2px 10px rgba(0,0,0,0.1)',
+    alignItems: 'center'
+  },
+  micButton: {
+    padding: '12px',
+    background: '#007AFF',
+    color: 'white',
+    border: 'none',
+    borderRadius: '50%',
+    fontSize: '20px',
+    cursor: 'pointer',
+    width: '48px',
+    height: '48px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0
   },
   chatInput: {
     flex: 1,
@@ -616,7 +714,8 @@ const styles = {
     borderRadius: '25px',
     fontWeight: 'bold',
     cursor: 'pointer',
-    transition: 'opacity 0.2s'
+    transition: 'opacity 0.2s',
+    flexShrink: 0
   }
 };
 

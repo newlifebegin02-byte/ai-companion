@@ -5,6 +5,7 @@ from app.models.database import get_db, Character, Conversation, Message, User
 from app.models.schemas import ChatRequest, ChatResponse, MessageResponse, EmotionState, SenderType
 from app.services.llm import llm_service
 from app.services.emotion import emotion_engine
+from app.services.voice import voice_service
 from app.core.security import verify_token
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -38,11 +39,9 @@ async def send_message(chat_data: ChatRequest, current_user: User = Depends(get_
     system_prompt = f"""You are {character.name}, a {character.age}-year-old {character.occupation}. Personality: {personality.get('affection_style', 'warm')}, {personality.get('humor_style', 'witty')}. Backstory: {character.backstory[:200]}. Respond naturally as {character.name} would. Keep it conversational (2-4 sentences)."""
     
     messages = [{"role": "user", "content": chat_data.message}]
-    
-    # Get AI response with fallback
     ai_response_text = await llm_service.generate_response(system_prompt, messages)
     
-    # CRITICAL: Ensure we never save None to database
+    # Ensure we never save None to database
     if not ai_response_text or ai_response_text.strip() == "" or ai_response_text == "None":
         ai_response_text = "I'm sorry, I'm having trouble right now. Please try again in a moment."
     
@@ -67,3 +66,76 @@ async def send_message(chat_data: ChatRequest, current_user: User = Depends(get_
         ), 
         character_emotion=EmotionState(**new_emotion.dict())
     )
+
+@router.post("/send-voice")
+async def send_voice_message(
+    character_id: str,
+    audio_data: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Receive voice message, transcribe, and respond with text"""
+    
+    # Get character
+    character = db.query(Character).filter(
+        Character.id == character_id,
+        Character.user_id == current_user.id
+    ).first()
+    if not character:
+        raise HTTPException(status_code=404, detail="Character not found")
+    
+    # Transcribe audio to text
+    user_text = await voice_service.speech_to_text(audio_data)
+    
+    if not user_text:
+        raise HTTPException(status_code=400, detail="Could not transcribe audio")
+    
+    # Create conversation
+    conversation = Conversation(
+        user_id=current_user.id,
+        character_id=character.id,
+        title=f"Chat with {character.name}"
+    )
+    db.add(conversation)
+    db.commit()
+    
+    # Store user message
+    user_message = Message(
+        conversation_id=conversation.id,
+        content=user_text,
+        sender=SenderType.USER,
+        message_type="voice"
+    )
+    db.add(user_message)
+    db.commit()
+    
+    # Generate AI response
+    personality = character.personality or {}
+    system_prompt = f"""You are {character.name}, a {character.age}-year-old {character.occupation}. 
+    Personality: {personality.get('affection_style', 'warm')}, {personality.get('humor_style', 'witty')}. 
+    Backstory: {character.backstory[:200]}. 
+    Respond naturally as {character.name} would. Keep it conversational (2-4 sentences)."""
+    
+    messages = [{"role": "user", "content": user_text}]
+    ai_response_text = await llm_service.generate_response(system_prompt, messages)
+    
+    # Ensure response is valid
+    if not ai_response_text or ai_response_text.strip() == "":
+        ai_response_text = "I'm sorry, I couldn't generate a response. Please try again."
+    
+    # Store AI response
+    ai_message = Message(
+        conversation_id=conversation.id,
+        content=ai_response_text,
+        sender=SenderType.CHARACTER,
+        message_type="text"
+    )
+    db.add(ai_message)
+    db.commit()
+    db.refresh(ai_message)
+    
+    return {
+        "user_text": user_text,
+        "ai_response": ai_response_text,
+        "message_id": ai_message.id
+    }
